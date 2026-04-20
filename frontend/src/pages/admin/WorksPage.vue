@@ -1,0 +1,803 @@
+<script setup lang="ts">
+import { ref, onMounted, computed } from 'vue'
+import api from '@/api'
+import { useAuthStore } from '@/stores/auth'
+import Dialog from '@/components/Dialog.vue'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
+import { useNotification } from '@/composables/useNotification'
+
+const authStore = useAuthStore()
+const { success, error } = useNotification()
+
+const works = ref<any[]>([])
+const loading = ref(true)
+const uploading = ref(false)
+const page = ref(1)
+const total = ref(0)
+const pageSize = 20
+const statusFilter = ref('')
+const keyword = ref('')
+const teamFilter = ref('')
+const themes = ref<any[]>([])
+const teams = ref<any[]>([])
+const userTeam = ref<any>(null)
+
+const showDialog = ref(false)
+const dialogType = ref<'detail' | 'create' | 'edit'>('detail')
+const showPdfModal = ref(false)
+const showVideoModal = ref(false)
+const editingWork = ref<any>(null)
+const formData = ref({
+  name: '',
+  description: '',
+  theme_id: null as number | null,
+  team_id: null as number | null,
+  agent_url: '',
+  agent_editor_url: '',
+  pdf_file: null as File | null,
+  video_file: null as File | null,
+  status: 'pending'
+})
+
+// Confirm dialog state
+const showConfirm = ref(false)
+const confirmMessage = ref('')
+const confirmCallback = ref<(() => void) | null>(null)
+
+const canAudit = computed(() => authStore.isAdmin || authStore.isReviewer)
+const hasTeam = computed(() => !!userTeam.value)
+const canAddWork = computed(() => canAudit.value || hasTeam.value)
+
+onMounted(async () => {
+  if (!canAudit.value) {
+    await fetchUserTeam()
+  } else {
+    await fetchTeams()
+  }
+  await fetchWorks()
+  await fetchThemes()
+})
+
+async function fetchUserTeam() {
+  try {
+    const res = await api.get('/teams/my/team')
+    if (res.data) {
+      userTeam.value = res.data
+    }
+  } catch (e) {
+    userTeam.value = null
+  }
+}
+
+async function fetchWorks() {
+  loading.value = true
+  try {
+    const res = await api.get('/works', {
+      params: {
+        page: page.value,
+        page_size: pageSize,
+        status: statusFilter.value || undefined,
+        keyword: keyword.value || undefined,
+        team_name: teamFilter.value || undefined
+      }
+    })
+    works.value = res.data.items || []
+    total.value = res.data.total || 0
+  } catch (e) {
+    console.error(e)
+  } finally {
+    loading.value = false
+  }
+}
+
+async function fetchThemes() {
+  try {
+    const res = await api.get('/settings/competition-themes', { params: { page_size: 100 } })
+    themes.value = res.data.items?.filter((t: any) => t.is_active) || []
+  } catch (e) {
+    themes.value = []
+  }
+}
+
+async function fetchTeams() {
+  try {
+    const res = await api.get('/teams', { params: { status: 'approved', page_size: 100 } })
+    teams.value = res.data.items || []
+  } catch (e) {
+    teams.value = []
+  }
+}
+
+function openDetail(work: any) {
+  editingWork.value = work
+  dialogType.value = 'detail'
+  showDialog.value = true
+}
+
+function openCreate() {
+  editingWork.value = null
+  formData.value = {
+    name: '',
+    description: '',
+    theme_id: null,
+    team_id: userTeam.value?.id || null,
+    agent_url: '',
+    agent_editor_url: '' as any,
+    pdf_file: null,
+    video_file: null,
+    status: 'pending'
+  }
+  dialogType.value = 'create'
+  showDialog.value = true
+}
+
+function openEdit(work: any) {
+  editingWork.value = work
+  formData.value = {
+    name: work.name,
+    description: work.description || '',
+    theme_id: work.theme_id || null,
+    team_id: work.team_id || null,
+    agent_url: work.agent_url || '',
+    agent_editor_url: work.agent_editor_url || '' as any,
+    pdf_file: null,
+    video_file: null,
+    status: work.status
+  }
+  dialogType.value = 'edit'
+  showDialog.value = true
+}
+
+async function handleSave() {
+  // 验证必填字段
+  if (dialogType.value === 'create') {
+    if (!formData.value.name) {
+      error('创建失败', '请输入作品名称')
+      return
+    }
+    if (!formData.value.theme_id) {
+      error('创建失败', '请选择主题方向')
+      return
+    }
+    if (!formData.value.agent_url) {
+      error('创建失败', '请输入智能体URL')
+      return
+    }
+  }
+
+  if (dialogType.value === 'create') {
+    uploading.value = true
+    const form = new FormData()
+    form.append('name', formData.value.name)
+    if (formData.value.description) form.append('description', formData.value.description)
+    form.append('theme_id', String(formData.value.theme_id))
+    if (formData.value.team_id) form.append('team_id', String(formData.value.team_id))
+    form.append('agent_url', formData.value.agent_url)
+    if (formData.value.agent_editor_url) form.append('agent_editor_url', formData.value.agent_editor_url)
+    if (formData.value.pdf_file) form.append('pdf_file', formData.value.pdf_file)
+    if (formData.value.video_file) form.append('video_file', formData.value.video_file)
+
+    try {
+      const token = localStorage.getItem('token')
+      const res = await fetch('/api/works', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+        body: form
+      })
+      const data = await res.json()
+      if (!res.ok) throw { response: { data } }
+      showDialog.value = false
+      success('创建成功')
+      await fetchWorks()
+    } catch (e: any) {
+      error('创建失败', e.response?.data?.detail)
+    } finally {
+      uploading.value = false
+    }
+  } else {
+    try {
+      await api.put(`/works/${editingWork.value.id}`, {
+        name: formData.value.name,
+        description: formData.value.description,
+        theme_id: formData.value.theme_id,
+        agent_url: formData.value.agent_url,
+        agent_editor_url: formData.value.agent_editor_url,
+        status: canAudit ? formData.value.status : undefined
+      })
+      showDialog.value = false
+      success('更新成功')
+      await fetchWorks()
+    } catch (e: any) {
+      error('操作失败', e.response?.data?.detail)
+    }
+  }
+}
+
+async function handleAudit(status: string) {
+  if (!editingWork.value) return
+  try {
+    await api.put(`/works/${editingWork.value.id}`, { status })
+    showDialog.value = false
+    success('审核成功')
+    await fetchWorks()
+  } catch (e: any) {
+    error('操作失败', e.response?.data?.detail)
+  }
+}
+
+async function handleDelete(work: any) {
+  confirmMessage.value = `确定删除作品 "${work.name}" 吗？此操作不可恢复。`
+  showConfirm.value = true
+  confirmCallback.value = async () => {
+    try {
+      await api.delete(`/works/${work.id}`)
+      success('删除成功')
+      await fetchWorks()
+    } catch (e: any) {
+      error('删除失败', e.response?.data?.detail)
+    }
+  }
+}
+
+async function handleStatusChange(work: any, newStatus: string) {
+  try {
+    await api.put(`/works/${work.id}`, { status: newStatus })
+    success('状态更新成功')
+    work.status = newStatus
+  } catch (e: any) {
+    error('状态更新失败', e.response?.data?.detail)
+    await fetchWorks()
+  }
+}
+
+function openUrl(url: string) {
+  if (url) window.open(url, '_blank')
+}
+
+function getPdfUrl(path: string) {
+  if (!path) return ''
+  // 确保正确的URL路径
+  const cleanPath = path.replace(/^\.\//, '').replace(/^\//, '')
+  return '/' + cleanPath
+}
+
+function getVideoUrl(path: string) {
+  if (!path) return ''
+  const cleanPath = path.replace(/^\.\//, '').replace(/^\//, '')
+  return '/' + cleanPath
+}
+
+function openPdfViewer() {
+  if (editingWork.value?.pdf_file) {
+    showPdfModal.value = true
+  }
+}
+
+function openVideoPlayer() {
+  if (editingWork.value?.video_file) {
+    showVideoModal.value = true
+  }
+}
+
+function handlePageChange(newPage: number) {
+  page.value = newPage
+  fetchWorks()
+}
+
+function handleSearch() {
+  page.value = 1
+  fetchWorks()
+}
+</script>
+
+<template>
+  <div>
+    <!-- Header -->
+    <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6">
+      <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        <div>
+          <h1 class="text-2xl font-bold text-gray-800">作品管理</h1>
+          <p class="text-sm text-gray-500 mt-1">管理参赛作品与审核状态</p>
+        </div>
+        <button
+          v-if="canAddWork"
+          @click="openCreate"
+          class="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl hover:from-blue-700 hover:to-blue-800 transition-all shadow-lg shadow-blue-600/20 font-medium"
+        >
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/>
+          </svg>
+          添加作品
+        </button>
+        <div
+          v-else
+          class="inline-flex items-center gap-2 px-5 py-2.5 bg-gray-100 text-gray-400 rounded-xl cursor-not-allowed font-medium"
+        >
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/>
+          </svg>
+          请先创建队伍
+        </div>
+      </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 mb-6">
+      <div class="flex flex-col md:flex-row gap-4">
+        <div class="flex-1 relative">
+          <svg class="w-5 h-5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+          </svg>
+          <input
+            v-model="keyword"
+            type="text"
+            placeholder="搜索作品名"
+            class="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+            @keyup.enter="handleSearch"
+          />
+        </div>
+        <div class="flex-1 relative">
+          <svg class="w-5 h-5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/>
+          </svg>
+          <input
+            v-model="teamFilter"
+            type="text"
+            placeholder="搜索队伍名"
+            class="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+            @keyup.enter="handleSearch"
+          />
+        </div>
+        <select
+          v-model="statusFilter"
+          class="px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all bg-white min-w-[140px]"
+          @change="handleSearch"
+        >
+          <option value="">全部状态</option>
+          <option value="pending">待审核</option>
+          <option value="approved">已通过</option>
+          <option value="rejected">已拒绝</option>
+        </select>
+        <button
+          @click="handleSearch"
+          class="px-6 py-2.5 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl hover:from-blue-700 hover:to-blue-800 transition-all shadow-lg shadow-blue-600/20 font-medium"
+        >
+          搜索
+        </button>
+      </div>
+    </div>
+
+    <!-- Table -->
+    <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+      <table class="w-full">
+        <thead>
+          <tr class="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200">
+            <th class="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">ID</th>
+            <th class="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">作品名</th>
+            <th class="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">队伍</th>
+            <th class="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">主题</th>
+            <th class="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">投票</th>
+            <th class="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">评分</th>
+            <th class="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">状态</th>
+            <th class="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">操作</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100">
+          <tr
+            v-for="work in works"
+            :key="work.id"
+            class="hover:bg-blue-50/50 transition-colors"
+          >
+            <td class="px-6 py-4 text-sm font-medium text-gray-900">{{ work.id }}</td>
+            <td class="px-6 py-4 text-sm text-gray-800 font-medium">{{ work.name }}</td>
+            <td class="px-6 py-4 text-sm text-gray-600">{{ work.team_name || '-' }}</td>
+            <td class="px-6 py-4 text-sm text-gray-600">{{ work.theme_name || '-' }}</td>
+            <td class="px-6 py-4 text-sm">
+              <div class="flex items-center gap-1 text-gray-600">
+                <svg class="w-4 h-4 text-red-500" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/>
+                </svg>
+                {{ work.vote_count }}
+              </div>
+            </td>
+            <td class="px-6 py-4 text-sm">
+              <span v-if="work.score" class="text-gray-800 font-medium">{{ work.score.toFixed(1) }}</span>
+              <span v-else class="text-gray-400">-</span>
+            </td>
+            <td class="px-6 py-4 text-sm">
+              <span
+                class="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-medium"
+                :class="{
+                  'bg-amber-100 text-amber-700': work.status === 'pending',
+                  'bg-green-100 text-green-700': work.status === 'approved',
+                  'bg-red-100 text-red-700': work.status === 'rejected'
+                }"
+              >
+                <span class="w-1.5 h-1.5 rounded-full mr-1.5" :class="{
+                  'bg-amber-500': work.status === 'pending',
+                  'bg-green-500': work.status === 'approved',
+                  'bg-red-500': work.status === 'rejected'
+                }"></span>
+                {{ work.status === 'pending' ? '待审核' : work.status === 'approved' ? '已通过' : '已拒绝' }}
+              </span>
+            </td>
+            <td class="px-6 py-4 text-sm">
+              <div class="flex items-center gap-2">
+                <button @click="openDetail(work)" class="text-blue-600 hover:text-blue-700 font-medium transition-colors">详情</button>
+                <span class="text-gray-300">|</span>
+                <select
+                  v-if="canAudit"
+                  :value="work.status"
+                  @change="handleStatusChange(work, ($event.target as HTMLSelectElement).value)"
+                  class="text-xs border border-gray-200 rounded px-1 py-0.5 focus:ring-1 focus:ring-blue-500"
+                  :class="{
+                    'text-amber-600 bg-amber-50': work.status === 'pending',
+                    'text-green-600 bg-green-50': work.status === 'approved',
+                    'text-red-600 bg-red-50': work.status === 'rejected'
+                  }"
+                >
+                  <option value="pending">待审核</option>
+                  <option value="approved">已通过</option>
+                  <option value="rejected">已拒绝</option>
+                </select>
+                <span v-else class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
+                  :class="{
+                    'text-amber-600 bg-amber-50': work.status === 'pending',
+                    'text-green-600 bg-green-50': work.status === 'approved',
+                    'text-red-600 bg-red-50': work.status === 'rejected'
+                  }">
+                  {{ work.status === 'pending' ? '待审核' : work.status === 'approved' ? '已通过' : '已拒绝' }}
+                </span>
+                <span class="text-gray-300">|</span>
+                <button @click="openEdit(work)" class="text-green-600 hover:text-green-700 font-medium transition-colors">编辑</button>
+                <span class="text-gray-300">|</span>
+                <button @click="handleDelete(work)" class="text-red-600 hover:text-red-700 font-medium transition-colors">删除</button>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div v-if="loading" class="text-center py-12">
+        <div class="inline-flex items-center gap-2 text-gray-500">
+          <svg class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+          </svg>
+          加载中...
+        </div>
+      </div>
+      <div v-else-if="works.length === 0" class="text-center py-12 text-gray-500">
+        <svg class="w-12 h-12 mx-auto text-gray-300 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/>
+        </svg>
+        暂无数据
+      </div>
+
+      <div v-if="total > pageSize" class="px-6 py-4 border-t border-gray-100 flex justify-center">
+        <div class="flex items-center gap-1">
+          <button
+            @click="handlePageChange(page - 1)"
+            :disabled="page === 1"
+            class="px-3 py-1.5 rounded-lg border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            上一页
+          </button>
+          <div class="px-4 py-1.5 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-lg text-sm font-medium shadow-md">
+            {{ page }} / {{ Math.ceil(total / pageSize) }}
+          </div>
+          <button
+            @click="handlePageChange(page + 1)"
+            :disabled="page * pageSize >= total"
+            class="px-3 py-1.5 rounded-lg border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            下一页
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Detail Dialog -->
+    <Dialog
+      :show="showDialog && dialogType === 'detail'"
+      :title="editingWork?.name || '作品详情'"
+      subtitle="作品详细信息"
+      size="xl"
+      @close="showDialog = false"
+    >
+      <div class="p-6 space-y-5">
+        <div class="grid md:grid-cols-2 gap-5">
+          <div class="bg-gray-50 rounded-xl p-4">
+            <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">队伍</label>
+            <p class="text-gray-800 font-medium mt-1">{{ editingWork?.team_name }}</p>
+          </div>
+          <div class="bg-gray-50 rounded-xl p-4">
+            <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">主题</label>
+            <p class="text-gray-800 font-medium mt-1">{{ editingWork?.theme || '未设置' }}</p>
+          </div>
+        </div>
+
+        <div class="bg-gray-50 rounded-xl p-4">
+          <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">描述</label>
+          <p class="text-gray-800 mt-1 whitespace-pre-wrap">{{ editingWork?.description || '暂无描述' }}</p>
+        </div>
+
+        <div class="grid md:grid-cols-2 gap-5">
+          <div class="bg-gray-50 rounded-xl p-4">
+            <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">智能体URL</label>
+            <button
+              v-if="editingWork?.agent_url"
+              @click="openUrl(editingWork.agent_url)"
+              class="mt-2 inline-flex items-center gap-1 text-blue-600 hover:text-blue-700 font-medium"
+            >
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+              </svg>
+              打开链接
+            </button>
+            <span v-else class="text-gray-400 mt-2 block">-</span>
+          </div>
+          <div class="bg-gray-50 rounded-xl p-4">
+            <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">编排URL</label>
+            <button
+              v-if="editingWork?.agent_editor_url"
+              @click="openUrl(editingWork.agent_editor_url)"
+              class="mt-2 inline-flex items-center gap-1 text-blue-600 hover:text-blue-700 font-medium"
+            >
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+              </svg>
+              打开链接
+            </button>
+            <span v-else class="text-gray-400 mt-2 block">-</span>
+          </div>
+        </div>
+
+        <div class="grid md:grid-cols-2 gap-5">
+          <div class="bg-gray-50 rounded-xl p-4">
+            <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">PDF文档</label>
+            <div v-if="editingWork?.pdf_file" class="mt-2">
+              <p class="text-blue-600 font-medium text-sm">{{ editingWork.pdf_file.split('/').pop() }}</p>
+              <button @click="openPdfViewer" class="inline-flex items-center gap-1 mt-2 text-blue-600 hover:text-blue-700 font-medium text-sm">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+                </svg>
+                在线预览
+              </button>
+            </div>
+            <span v-else class="text-gray-400 mt-1 block">-</span>
+          </div>
+          <div class="bg-gray-50 rounded-xl p-4">
+            <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">演示视频</label>
+            <div v-if="editingWork?.video_file" class="mt-2">
+              <p class="text-blue-600 font-medium text-sm">{{ editingWork.video_file.split('/').pop() }}</p>
+              <button @click="openVideoPlayer" class="inline-flex items-center gap-1 mt-2 text-blue-600 hover:text-blue-700 font-medium text-sm">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/>
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+                在线播放
+              </button>
+            </div>
+            <span v-else class="text-gray-400 mt-1 block">-</span>
+          </div>
+        </div>
+
+        <div class="grid md:grid-cols-2 gap-5">
+          <div class="bg-gray-50 rounded-xl p-4">
+            <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">投票数</label>
+            <p class="text-gray-800 font-medium mt-1">{{ editingWork?.vote_count }}</p>
+          </div>
+          <div class="bg-gray-50 rounded-xl p-4">
+            <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">评分</label>
+            <p class="text-gray-800 font-medium mt-1">{{ editingWork?.score?.toFixed(1) || '暂无' }}</p>
+          </div>
+        </div>
+
+        <div v-if="canAudit && editingWork?.status === 'pending'" class="flex gap-3 pt-2">
+          <button
+            @click="handleAudit('approved')"
+            class="flex-1 py-3 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-xl hover:from-green-600 hover:to-green-700 transition-all shadow-lg shadow-green-500/20 font-medium"
+          >
+            通过审核
+          </button>
+          <button
+            @click="handleAudit('rejected')"
+            class="flex-1 py-3 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-xl hover:from-red-600 hover:to-red-700 transition-all shadow-lg shadow-red-500/20 font-medium"
+          >
+            拒绝
+          </button>
+        </div>
+      </div>
+    </Dialog>
+
+    <!-- Create/Edit Dialog -->
+    <Dialog
+      :show="showDialog && (dialogType === 'create' || dialogType === 'edit')"
+      :title="dialogType === 'create' ? '添加作品' : '编辑作品'"
+      :subtitle="dialogType === 'create' ? '创建新作品' : '修改作品信息'"
+      size="xl"
+      @close="showDialog = false"
+    >
+      <form @submit.prevent="handleSave" class="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1.5">作品名称 <span class="text-red-500">*</span></label>
+          <input
+            v-model="formData.name"
+            type="text"
+            required
+            class="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+            placeholder="请输入作品名称"
+          />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1.5">描述</label>
+          <textarea
+            v-model="formData.description"
+            rows="3"
+            class="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+            placeholder="请输入作品描述"
+          ></textarea>
+        </div>
+        <div class="grid md:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1.5">所属队伍</label>
+            <div v-if="canAudit">
+              <select
+                v-model="formData.team_id"
+                class="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all bg-white"
+              >
+                <option :value="null">请选择队伍</option>
+                <option v-for="team in teams" :key="team.id" :value="team.id">{{ team.name }}</option>
+              </select>
+            </div>
+            <div v-else class="px-4 py-2.5 bg-gray-100 border border-gray-200 rounded-xl text-gray-600">
+              {{ userTeam?.name || '未加入队伍' }}
+            </div>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1.5">主题方向 <span class="text-red-500">*</span></label>
+            <select
+              v-model="formData.theme_id"
+              :disabled="!canAudit && !userTeam"
+              required
+              class="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all bg-white disabled:bg-gray-100 disabled:text-gray-500"
+            >
+              <option :value="null">请选择主题</option>
+              <option v-for="theme in themes" :key="theme.id" :value="theme.id">{{ theme.name }}</option>
+            </select>
+          </div>
+          <div v-if="(canAudit || hasTeam) && dialogType === 'edit'">
+            <label class="block text-sm font-medium text-gray-700 mb-1.5">状态</label>
+            <select
+              v-model="formData.status"
+              class="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all bg-white"
+            >
+              <option value="pending">待审核</option>
+              <option value="approved">已通过</option>
+              <option value="rejected">已拒绝</option>
+            </select>
+          </div>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1.5">智能体URL <span class="text-red-500">*</span></label>
+          <input
+            v-model="formData.agent_url"
+            type="url"
+            required
+            class="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+            placeholder="https://..."
+          />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1.5">编排URL</label>
+          <input
+            v-model="formData.agent_editor_url"
+            type="url"
+            class="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+            placeholder="https://..."
+          />
+        </div>
+        <div v-if="dialogType === 'create' || dialogType === 'edit'">
+          <label class="block text-sm font-medium text-gray-700 mb-1.5">PDF文档 <span class="text-gray-400">(≤10MB)</span></label>
+          <div class="border-2 border-dashed border-gray-200 rounded-xl p-4 text-center hover:border-blue-400 transition-colors">
+            <input
+              @change="(e: any) => formData.pdf_file = e.target.files[0]"
+              type="file"
+              accept=".pdf"
+              class="hidden"
+              id="pdf-upload"
+            />
+            <label for="pdf-upload" class="cursor-pointer">
+              <svg class="w-8 h-8 mx-auto text-gray-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/>
+              </svg>
+              <span class="text-sm text-gray-500">{{ formData.pdf_file?.name || '点击上传PDF文件' }}</span>
+            </label>
+          </div>
+        </div>
+        <div v-if="dialogType === 'create' || dialogType === 'edit'">
+          <label class="block text-sm font-medium text-gray-700 mb-1.5">演示视频 <span class="text-gray-400">(≤50MB)</span></label>
+          <div class="border-2 border-dashed border-gray-200 rounded-xl p-4 text-center hover:border-blue-400 transition-colors">
+            <input
+              @change="(e: any) => formData.video_file = e.target.files[0]"
+              type="file"
+              accept="video/mp4"
+              class="hidden"
+              id="video-upload"
+            />
+            <label for="video-upload" class="cursor-pointer">
+              <svg class="w-8 h-8 mx-auto text-gray-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+              </svg>
+              <span class="text-sm text-gray-500">{{ formData.video_file?.name || '点击上传MP4视频' }}</span>
+            </label>
+          </div>
+        </div>
+        <div class="flex justify-end gap-3 pt-4">
+          <button
+            type="button"
+            @click="showDialog = false"
+            :disabled="uploading"
+            class="px-5 py-2.5 border border-gray-200 rounded-xl hover:bg-gray-50 font-medium text-gray-700 transition-colors disabled:opacity-50"
+          >
+            取消
+          </button>
+          <button
+            type="submit"
+            :disabled="uploading"
+            class="px-5 py-2.5 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl hover:from-blue-700 hover:to-blue-800 transition-all shadow-lg shadow-blue-600/20 font-medium disabled:opacity-50 flex items-center gap-2"
+          >
+            <svg v-if="uploading" class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+            </svg>
+            {{ uploading ? '保存中...' : '保存' }}
+          </button>
+        </div>
+      </form>
+    </Dialog>
+
+    <!-- Confirm Dialog -->
+    <ConfirmDialog
+      :show="showConfirm"
+      title="确认删除"
+      :message="confirmMessage"
+      confirm-text="删除"
+      cancel-text="取消"
+      type="danger"
+      @confirm="() => { if (confirmCallback) confirmCallback(); showConfirm = false }"
+      @cancel="showConfirm = false"
+      @close="showConfirm = false"
+    />
+
+    <!-- PDF Viewer Dialog -->
+    <Dialog
+      :show="showPdfModal"
+      title="PDF文档预览"
+      :subtitle="editingWork?.name"
+      size="6xl"
+      @close="showPdfModal = false"
+    >
+      <div class="h-[70vh]">
+        <iframe :src="getPdfUrl(editingWork?.pdf_file)" class="w-full h-full" frameborder="0"></iframe>
+      </div>
+    </Dialog>
+
+    <!-- Video Player Dialog -->
+    <Dialog
+      :show="showVideoModal"
+      title="演示视频播放"
+      :subtitle="editingWork?.name"
+      size="lg"
+      @close="showVideoModal = false"
+    >
+      <div class="p-4 bg-black">
+        <video :src="getVideoUrl(editingWork?.video_file)" controls class="w-full rounded-lg" preload="metadata">
+          您的浏览器不支持视频播放
+        </video>
+      </div>
+    </Dialog>
+  </div>
+</template>
