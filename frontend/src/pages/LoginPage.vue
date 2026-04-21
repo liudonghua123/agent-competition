@@ -45,10 +45,8 @@ async function handleLogin() {
 }
 
 function handleCasLogin() {
-  // Redirect to CAS login
-  const currentUrl = window.location.origin
-  const redirectUrl = `${currentUrl}/api/auth/cas/callback`
-  window.location.href = `/api/auth/cas/login?service=${encodeURIComponent(redirectUrl)}`
+  // Redirect to CAS login (backend will handle service URL)
+  window.location.href = '/api/auth/cas/login'
 }
 </script>
 

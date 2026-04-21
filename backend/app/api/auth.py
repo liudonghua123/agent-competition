@@ -155,16 +155,21 @@ async def cas_login(
     # 获取前端跳转URL，默认为首页
     frontend_url = settings.CORS_ORIGINS[0] if settings.CORS_ORIGINS else "http://localhost:5173"
     if not service:
-        service = f"{frontend_url}/api/auth/cas/callback"
+        service = f"{frontend_url}/login"
 
-    # 构建CAS登录URL
+    # 构建回调URL（必须是可公开访问的地址）
+    # 对于本地开发，callback是 http://localhost:5173/api/auth/cas/callback (通过Vite代理)
+    # 对于生产环境，callback是 https://your-domain.com/api/auth/cas/callback
+    callback_url = f"{frontend_url}/api/auth/cas/callback"
+
+    # 构建CAS登录URL - 使用urllib.parse.urlencode正确编码
     from urllib.parse import urlencode
-    params = {
-        "service": service
-    }
-    login_url = f"{cas_config['cas_login_url']}?{urlencode(params)}"
+    login_url = f"{cas_config['cas_login_url']}?service={urlencode({'service': callback_url})}"
 
-    return RedirectResponse(url=login_url)
+    response = RedirectResponse(url=login_url)
+    # 保存原始跳转URL到cookie
+    response.set_cookie(key="cas_redirect", value=service, httponly=True, max_age=300)
+    return response
 
 
 @router.get("/cas/callback")
@@ -191,13 +196,13 @@ async def cas_callback(
 
     # 获取前端URL
     frontend_url = settings.CORS_ORIGINS[0] if settings.CORS_ORIGINS else "http://localhost:5173"
-    if not service:
-        service = f"{frontend_url}/api/auth/cas/callback"
+
+    # 构建回调URL（必须与cas/login中传递的service一致）
+    callback_url = f"{frontend_url}/api/auth/cas/callback"
 
     # 验证票据 - 调用CAS的serviceValidate端点
-    from urllib.parse import urlencode, quote
-    encoded_service = quote(service, safe='')
-    validate_url = f"{cas_config['cas_service_validate_url']}?service={encoded_service}&ticket={ticket}"
+    from urllib.parse import urlencode
+    validate_url = f"{cas_config['cas_service_validate_url']}?service={urlencode({'service': callback_url})}&ticket={ticket}"
 
     async with httpx.AsyncClient() as client:
         try:
