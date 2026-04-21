@@ -48,8 +48,11 @@ class Settings(BaseSettings):
     STATIC_DIR: str = "./static"
     STATIC_TEMPLATE_DIR: str = "./templates"
 
+    # 应用基础URL
+    BASE_URL: str = "http://localhost:5173"
+
     # CORS 配置
-    CORS_ORIGINS: list = ["http://localhost:5173", "http://localhost:3000"]
+    CORS_ORIGINS: list = ["http://localhost:5173"]
 
     model_config = SettingsConfigDict(
         env_file=".env",

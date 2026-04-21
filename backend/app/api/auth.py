@@ -20,6 +20,7 @@ from app.models.setting import Log
 from app.schemas.user import (
     LoginRequest, UnifiedAuthLoginRequest, TokenResponse, UserResponse
 )
+from urllib.parse import quote
 
 router = APIRouter(prefix="/auth", tags=["认证"])
 
@@ -37,6 +38,13 @@ def generate_strong_password(length: int = 16) -> str:
             return password
 
 
+def get_base_url(db: Session) -> str:
+    """获取应用基础URL"""
+    from app.models.setting import Setting
+    setting = db.query(Setting).filter(Setting.key == "base_url").first()
+    return setting.value if setting and setting.value else settings.BASE_URL
+
+
 def get_cas_config(db: Session) -> dict:
     """获取CAS配置"""
     from app.models.setting import Setting
@@ -44,15 +52,15 @@ def get_cas_config(db: Session) -> dict:
     cas_enabled = db.query(Setting).filter(Setting.key == "cas_enabled").first()
     cas_base_url = db.query(Setting).filter(Setting.key == "cas_base_url").first()
 
-    default_base = "https://ids.ynu.edu.cn/authserver"
+    default_cas_base = "https://ids.ynu.edu.cn/authserver"
 
     return {
         "enabled": cas_enabled.value.lower() == "true" if cas_enabled else True,
-        "cas_base_url": cas_base_url.value if cas_base_url else default_base,
-        "cas_validate_url": f"{cas_base_url.value if cas_base_url else default_base}/validate",
-        "cas_service_validate_url": f"{cas_base_url.value if cas_base_url else default_base}/serviceValidate",
-        "cas_login_url": f"{cas_base_url.value if cas_base_url else default_base}/login",
-        "cas_logout_url": f"{cas_base_url.value if cas_base_url else default_base}/logout",
+        "cas_base_url": cas_base_url.value if cas_base_url else default_cas_base,
+        "cas_validate_url": f"{cas_base_url.value if cas_base_url else default_cas_base}/validate",
+        "cas_service_validate_url": f"{cas_base_url.value if cas_base_url else default_cas_base}/serviceValidate",
+        "cas_login_url": f"{cas_base_url.value if cas_base_url else default_cas_base}/login",
+        "cas_logout_url": f"{cas_base_url.value if cas_base_url else default_cas_base}/logout",
     }
 
 
@@ -152,19 +160,16 @@ async def cas_login(
             detail="统一身份认证未启用"
         )
 
-    # 获取前端跳转URL，默认为首页
-    frontend_url = settings.CORS_ORIGINS[0] if settings.CORS_ORIGINS else "http://localhost:5173"
+    # 获取应用基础URL
+    frontend_url = get_base_url(db)
     if not service:
         service = f"{frontend_url}/login"
 
     # 构建回调URL（必须是可公开访问的地址）
-    # 对于本地开发，callback是 http://localhost:5173/api/auth/cas/callback (通过Vite代理)
-    # 对于生产环境，callback是 https://your-domain.com/api/auth/cas/callback
     callback_url = f"{frontend_url}/api/auth/cas/callback"
 
-    # 构建CAS登录URL - 使用urllib.parse.urlencode正确编码
-    from urllib.parse import urlencode
-    login_url = f"{cas_config['cas_login_url']}?service={urlencode({'service': callback_url})}"
+    # 构建CAS登录URL
+    login_url = f"{cas_config['cas_login_url']}?service={quote(callback_url, safe='')}"
 
     response = RedirectResponse(url=login_url)
     # 保存原始跳转URL到cookie
@@ -194,15 +199,15 @@ async def cas_callback(
             detail="统一身份认证未启用"
         )
 
-    # 获取前端URL
-    frontend_url = settings.CORS_ORIGINS[0] if settings.CORS_ORIGINS else "http://localhost:5173"
+    # 获取应用基础URL
+    frontend_url = get_base_url(db)
 
     # 构建回调URL（必须与cas/login中传递的service一致）
     callback_url = f"{frontend_url}/api/auth/cas/callback"
 
     # 验证票据 - 调用CAS的serviceValidate端点
     from urllib.parse import urlencode
-    validate_url = f"{cas_config['cas_service_validate_url']}?service={urlencode({'service': callback_url})}&ticket={ticket}"
+    validate_url = f"{cas_config['cas_service_validate_url']}?service={quote(callback_url, safe='')}&ticket={ticket}"
 
     async with httpx.AsyncClient() as client:
         try:
@@ -336,11 +341,10 @@ async def cas_logout(
 ):
     """CAS 登出"""
     cas_config = get_cas_config(db)
-
-    # 清除本地会话（如果需要）
+    frontend_url = get_base_url(db)
 
     # 跳转到CAS登出
-    logout_url = f"{cas_config['cas_logout_url']}?service={settings.CORS_ORIGINS[0] if settings.CORS_ORIGINS else 'http://localhost:5173'}"
+    logout_url = f"{cas_config['cas_logout_url']}?service={frontend_url}"
 
     return RedirectResponse(url=logout_url)
 

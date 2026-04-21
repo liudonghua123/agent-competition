@@ -31,6 +31,8 @@ DEFAULT_SETTINGS = {
     # CAS 2.0 配置
     "cas_enabled": {"value": "true", "description": "是否启用统一身份认证"},
     "cas_base_url": {"value": "https://ids.ynu.edu.cn/authserver", "description": "CAS服务地址"},
+    # 应用基础URL
+    "base_url": {"value": "http://localhost:5173", "description": "应用基础URL，用于统一身份认证回调"},
 }
 
 

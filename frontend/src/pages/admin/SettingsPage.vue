@@ -38,6 +38,7 @@ const settingDescriptions: Record<string, { label: string; desc: string; type: s
   registration_start: { label: '报名开始时间', desc: '报名开始时间 (ISO 8601格式)', type: 'datetime-local', placeholder: '2024-01-01T00:00' },
   registration_end: { label: '报名结束时间', desc: '报名结束时间 (ISO 8601格式)', type: 'datetime-local', placeholder: '2024-12-31T23:59' },
   submission_end: { label: '作品提交截止', desc: '作品提交截止时间 (ISO 8601格式)', type: 'datetime-local', placeholder: '2024-12-31T23:59' },
+  base_url: { label: '应用基础URL', desc: '用于统一身份认证回调，线上环境请填写公网可访问的地址', type: 'text', placeholder: 'https://your-domain.com' },
   cas_enabled: { label: '启用CAS认证', desc: '是否启用CAS 2.0统一身份认证', type: 'text', placeholder: 'true/false' },
   cas_base_url: { label: 'CAS服务地址', desc: '统一身份认证服务器地址', type: 'text', placeholder: 'https://ids.ynu.edu.cn/authserver' }
 }
