@@ -47,7 +47,8 @@ from app.api import (
     settings_router,
     logs_router,
     permissions_router,
-    votes_router
+    votes_router,
+    agent_center_router
 )
 
 
@@ -109,6 +110,7 @@ app.include_router(settings_router, prefix="/api")
 app.include_router(logs_router, prefix="/api")
 app.include_router(permissions_router, prefix="/api")
 app.include_router(votes_router, prefix="/api")
+app.include_router(agent_center_router, prefix="/api")
 
 
 @app.get("/")

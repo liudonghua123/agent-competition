@@ -54,6 +54,14 @@ class Settings(BaseSettings):
     # CORS 配置
     CORS_ORIGINS: list = ["http://localhost:5173"]
 
+    # 火山引擎智能体中心配置
+    VOLCENGINE_HOST: str = "10.10.160.222:30040"
+    VOLCENGINE_AK: str = ""
+    VOLCENGINE_SK: str = ""
+    VOLCENGINE_REGION: str = "cn-north-1"
+    VOLCENGINE_SERVICE: str = "app"
+    VOLCENGINE_ACCOUNT_ID: str = "1000000000"
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

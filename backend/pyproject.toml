@@ -23,6 +23,7 @@ dependencies = [
     "markdown>=3.5.0",
     "email-validator>=2.3.0",
     "httpx>=0.28.1",
+    "volcengine>=1.0.221",
 ]
 
 [build-system]

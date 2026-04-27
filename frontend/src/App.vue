@@ -234,6 +234,9 @@ const sidebarCollapsed = ref(false)
               <RouterLink to="/works" class="px-4 py-2 text-sm font-medium text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition" active-class="text-blue-600 bg-blue-50">
                 作品展览
               </RouterLink>
+              <RouterLink to="/agent-center" class="px-4 py-2 text-sm font-medium text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition" active-class="text-blue-600 bg-blue-50">
+                智能体中心
+              </RouterLink>
             </nav>
 
             <!-- Auth Buttons -->
@@ -297,6 +300,7 @@ const sidebarCollapsed = ref(false)
               <ul class="space-y-2 text-sm">
                 <li><RouterLink to="/" class="hover:text-blue-400 transition">首页</RouterLink></li>
                 <li><RouterLink to="/works" class="hover:text-blue-400 transition">作品展览</RouterLink></li>
+                <li><RouterLink to="/agent-center" class="hover:text-blue-400 transition">智能体中心</RouterLink></li>
                 <li><RouterLink to="/login" class="hover:text-blue-400 transition">报名参赛</RouterLink></li>
               </ul>
             </div>

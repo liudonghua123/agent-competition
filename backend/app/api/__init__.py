@@ -9,6 +9,7 @@ from app.api.settings import router as settings_router
 from app.api.logs import router as logs_router
 from app.api.permissions import router as permissions_router
 from app.api.votes import router as votes_router
+from app.api.agent_center import router as agent_center_router
 
 __all__ = [
     "auth_router",
@@ -20,5 +21,6 @@ __all__ = [
     "settings_router",
     "logs_router",
     "permissions_router",
-    "votes_router"
+    "votes_router",
+    "agent_center_router"
 ]

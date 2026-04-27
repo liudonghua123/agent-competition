@@ -130,3 +130,10 @@ export const logApi = {
   resources: () => api.get('/logs/resources'),
   statistics: (days?: number) => api.get('/logs/statistics', { params: { days } })
 }
+
+// Agent Center APIs
+export const agentCenterApi = {
+  listCategories: () => api.get('/agent-center/categories'),
+  listAgents: (params?: { page?: number; page_size?: number; category?: string; keyword?: string; sort?: string }) =>
+    api.get('/agent-center', { params })
+}
